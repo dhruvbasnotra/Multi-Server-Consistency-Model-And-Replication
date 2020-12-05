@@ -1,0 +1,212 @@
+
+	class ServerThread implements Runnable
+	{
+		Server2 server = null;   //to give the thread the same server socket
+		Socket client = null;    //to give the thread the same socket connected to the client
+		final ObjectInputStream input;   //to give the thread an input stream
+		final ObjectOutputStream output;  //to give the thread an output stream
+		int id;  //for giving an ID to each thread
+		String message = "";
+		Instant timeEntered, timeExited;
+		
+		//constructor for the class ServerThread
+		//it will take the connectionSocket, counter, inputStream, outputStream, serverSocket as parameters
+		//each thread will have its own parameters
+		ServerThread(Socket client, int count, ObjectInputStream input, ObjectOutputStream output, Server2 server) throws IOException
+		{
+			//give the thread its own data from the parameters given
+			this.client = client;
+			this.server = server;
+			this.id= count;	
+			this.input = input;
+			this.output = output;
+			
+			//give the thread a name using the id given in the form : CLIENT(id)
+			this.setName("CLIENT("+this.id+")");
+		}
+		
+		public void setMessage(String message)
+		{
+			this.message = message;
+		}
+		
+		public String getMessage()
+		{
+			return this.message;
+		}
+		
+		@Override
+		public void run()    //this will run when we start a thread
+		{
+			try
+			{
+				//when we reach here, it means that the connection is established
+				//all the thread does is exchange messages
+				whileConnection();
+				
+				//if the message sent is END, it will close the thread's streams and sockets
+				closeThread();
+			}
+			catch(IOException ioException)
+			{
+				chatWindow.append("\nERROR: "+ ioException+"\n");
+			} catch (InterruptedException interruptedException) {
+				// TODO Auto-generated catch block
+				chatWindow.append("\nERROR: "+ interruptedException+"\n");
+			}
+		}
+		
+		//during the communication this function will happen
+		private void whileConnection() throws IOException, InterruptedException
+		{
+			String message = "";  //to get the message from the input stream
+			
+			//to separate the message from the client's name
+			//result[0] will carry CLIENT(id) 
+			//result[1] will carry the HTTPResponse and the random number
+			//result[2] will carry the message that was typed by the client
+			String[] result = { "" , "" , ""};  
+			
+			//once we reach here we enable the user's ability to type message
+			//userText.setEditable(true);  
+			
+			//we sent this message to notify the client that the server has connected to it
+			message = "Synchronized Value = " + initial_value;
+			sendThreadMessage(message);
+			
+			//we stay in this do-while loop as long as the client  does not send END
+			do
+			{
+				try
+				{
+					//reads data from the input stream
+					message = (String)input.readObject();
+					result = message.split("\r\n\r\n");
+					String[] val = result[1].split(initial_value + " ");
+					synchMessage+= val[1];
+					pollCounter++;
+					chatWindow.append("SynchronizedMessage = " + synchMessage + "\nPollCounter = "+ pollCounter+"\n"+ "ClientCounter = "+ clientCounter+"\n\n");
+					
+					if(pollCounter == clientCounter)
+					{
+						pollCounter = 0;
+						synchronizeValue();
+					}
+				}
+				catch (ClassNotFoundException classNotFoundException)
+				{
+					chatWindow.append("\nUnknown data sent from client!\n");
+				}
+			}while(!result[1].equalsIgnoreCase("END"));  //if the client sends END, the conversation will end
+			//server will print that the client ended the connection and close the threads sockets and streams
+			chatWindow.append("\nCLIENT ENDED CONNECTION!\n");
+			closeThread();
+		}
+		
+		//close streams and sockets after finish communication
+		private void closeThread()
+		{
+			chatWindow.append("\n" + Thread.currentThread().getName() + " Is Closing All Connections... \n");   //this will appear on server screen
+			clientCounter--;
+			try
+			{
+				//close streams to/from server
+				output.flush();
+				output.close();
+				input.close();
+				
+				threadList.remove(ServerThread.this);
+			}
+			catch(IOException ioException)
+			{
+			ioException.printStackTrace();	
+			}
+		}	
+	}
+	
+	public void synchronizeValue() throws IOException
+	{
+		//https://stackoverflow.com/questions/3422673/evaluating-a-math-expression-given-in-string-form
+		//from this website I managed to take the string operations entered and calculate them and print them to the screen
+		ScriptEngineManager mgr = new ScriptEngineManager();
+		ScriptEngine engine = mgr.getEngineByName("JavaScript");
+		try 
+		{
+			initial_value = engine.eval(synchMessage).toString();
+			chatWindow.append(synchMessage + " = " + initial_value + "\n");	
+			synchMessage = initial_value;
+			
+			String HTTPResponse = "HTTP/1.1 200 OK\r\nDate:" + LocalDateTime.now() + "\r\nServer: MyPC/2.0.52 (CentOS)\r\nLast-Modified: Tue, 30 Oct 2007 17:00:02 GMT\r\nAccept-Ranges: bytes\r\nContent-Length: 2652\r\nKeep-Alive: timeout=10, max=100\r\nConnection: Keep-Alive\r\nContent-Type: text/html; charset=ISO-8859-1\r\n\r\n" + initial_value;
+			
+			for(ServerThread client : threadList)
+    		{  
+        		client.output.writeObject("SERVER - " + HTTPResponse);   //we send the HTTPResponse through the output stream
+				client.output.flush();  //flush or empty the stream just in case any bytes are leftover in it
+    		}
+		} 
+		catch (ScriptException scriptException) 
+		{
+			scriptException.printStackTrace();
+		}
+	}
+	
+	//send message to client
+	public void sendThreadMessage(String message)
+	{
+		try
+		{
+			//here we create the HTTPResponse and add the message to the data field
+			String HTTPResponse = "HTTP/1.1 200 OK\r\nDate:" + LocalDateTime.now() + "\r\nServer: MyPC/2.0.52 (CentOS)\r\nLast-Modified: Tue, 30 Oct 2007 17:00:02 GMT\r\nAccept-Ranges: bytes\r\nContent-Length: 2652\r\nKeep-Alive: timeout=10, max=100\r\nConnection: Keep-Alive\r\nContent-Type: text/html; charset=ISO-8859-1\r\n\r\n" + message;
+					
+			output.writeObject("SERVER - " + HTTPResponse);   //we send the HTTPResponse through the output stream
+			output.flush();  //flush or empty the stream just in case any bytes are leftover in it
+			
+			//to display the HTTPResponse on the server window
+			chatWindow.append("\n" + HTTPResponse + "\n"); 
+		}
+		catch(IOException ioException)
+		{
+			chatWindow.append("\nERROR: Can't send message! \n");
+		}
+	}
+	
+	//setup and run the server after the constructor finishes
+	public void startRunning() throws IOException
+	{
+		//creates the server socket with port number 8080
+		server = new ServerSocket(8080);  
+				
+		//if server is ok and runnning this will appear  
+		chatWindow.append("\nServer Ready... \n");
+				
+		while(true)  //this will run forever
+		{
+			//must wait for someone to connect with server
+			waitForConnection();
+		}
+	}
+		
+	//server waits for connection from clients
+	private void waitForConnection() throws IOException
+	{
+		chatWindow.append("\nWaiting for client... \n");     //appears on the screen to notify that the server is running and all is well
+		connection = server.accept();   //when client asks to connect with server, the server accepts the connection
+		clientCounter++;   //we increase the counter, this counter will be sent with the create as an ID for the thread
+			
+		//print on server screen that a CLIENT(id) has connected
+		chatWindow.append("\nCLIENT(" + clientCounter + ") now connected to " + connection.getInetAddress().getHostName()+"\n"); //shows IP address of server
+		
+		output = new ObjectOutputStream(connection.getOutputStream());  //creates the output stream to send to client
+		output.flush();  //to remove leftover data in output buffer
+			
+		input = new ObjectInputStream(connection.getInputStream());  //creates the input stream to receive from client 
+			
+		//chatWindow.append("\nStreams are now setup!\n");
+			
+		//create the server thread with its own socket, id, input stream and output stream
+		ServerThread serverThread= new ServerThread(connection, clientCounter, input, output, this);
+		threadList.add(serverThread);
+		serverThread.start();  //to start the thread
+	}	
+}
+
